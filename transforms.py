@@ -16,13 +16,13 @@
 
 import cv2
 import numpy as np
-import sys
 
-class NormalizeImage(object):
+
+class NormalizeImage:
     """ normalize image such as substract mean, divide std
     """
 
-    def __init__(self, scale=None, mean=None, std=None, order='chw', **kwargs):
+    def __init__(self, scale=None, mean=None, std=None, order='chw'):
         if isinstance(scale, str):
             scale = eval(scale)
         self.scale = np.float32(scale if scale is not None else 1.0 / 255.0)
@@ -41,7 +41,7 @@ class NormalizeImage(object):
         assert isinstance(img,
                           np.ndarray), "invalid input 'img' in NormalizeImage"
         data['image'] = (
-            img.astype('float32') * self.scale - self.mean) / self.std
+                                img.astype('float32') * self.scale - self.mean) / self.std
         return data
 
 
@@ -61,9 +61,8 @@ class ToCHWImage(object):
         return data
 
 
-
 class KeepKeys(object):
-    def __init__(self, keep_keys, **kwargs):
+    def __init__(self, keep_keys):
         self.keep_keys = keep_keys
 
     def __call__(self, data):

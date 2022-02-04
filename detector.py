@@ -14,16 +14,14 @@
 import os
 import numpy as np
 import time
-import sys
 from utils import create_operators, transform
 from posptrocessor import DBPostProcess
 import onnxruntime as ort
 
+
 class TextDetector(object):
     def __init__(self, args):
         self.args = args
-
-        pre_process_list = []
 
         if not os.path.exists(args.det_model_dir):
             raise ValueError("not find model file path {}".format(
@@ -39,21 +37,20 @@ class TextDetector(object):
                     'image_shape': [img_h, img_w]
                 }
             }, {
-            'NormalizeImage': {
-                'std': [0.229, 0.224, 0.225],
-                'mean': [0.485, 0.456, 0.406],
-                'scale': '1./255.',
-                'order': 'hwc'
-            }
-        }, {
-            'ToCHWImage': None
-        }, {
-            'KeepKeys': {
-                'keep_keys': ['image', 'shape']
-            }
-        }]
-        postprocess_params = {}
-        postprocess_params['name'] = 'DBPostProcess'
+                'NormalizeImage': {
+                    'std': [0.229, 0.224, 0.225],
+                    'mean': [0.485, 0.456, 0.406],
+                    'scale': '1./255.',
+                    'order': 'hwc'
+                }
+            }, {
+                'ToCHWImage': None
+            }, {
+                'KeepKeys': {
+                    'keep_keys': ['image', 'shape']
+                }
+            }]
+        postprocess_params = dict()
         postprocess_params["thresh"] = args.det_db_thresh
         postprocess_params["box_thresh"] = args.det_db_box_thresh
         postprocess_params["max_candidates"] = 1000
@@ -64,8 +61,8 @@ class TextDetector(object):
 
         self.preprocess_op = create_operators(pre_process_list)
 
-
-    def order_points_clockwise(self, pts):
+    @staticmethod
+    def order_points_clockwise(pts):
         """
         reference from: https://github.com/jrosebr1/imutils/blob/master/imutils/perspective.py
         # sort the points based on their x-coordinates
@@ -89,7 +86,8 @@ class TextDetector(object):
         rect = np.array([tl, tr, br, bl], dtype="float32")
         return rect
 
-    def clip_det_res(self, points, img_height, img_width):
+    @staticmethod
+    def clip_det_res(points, img_height, img_width):
         for pno in range(points.shape[0]):
             points[pno, 0] = int(min(max(points[pno, 0], 0), img_width - 1))
             points[pno, 1] = int(min(max(points[pno, 1], 0), img_height - 1))
@@ -124,11 +122,11 @@ class TextDetector(object):
         shape_list = np.expand_dims(shape_list, axis=0)
         img = img.copy()
 
-        input_dict = {}
+        input_dict = dict()
         input_dict[self.input_tensor.name] = img
         outputs = self.predictor.run(None, input_dict)
 
-        preds = {}
+        preds = dict()
         preds['maps'] = outputs[0]
         post_result = self.postprocess_op(preds, shape_list)
         dt_boxes = post_result[0]['points']
