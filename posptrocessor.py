@@ -19,8 +19,102 @@ import numpy as np
 import cv2
 from shapely.geometry import Polygon
 import pyclipper
+import paddle
 
-class DBPostProcess(object):
+
+class ClsPostProcess:
+    """ Convert between text-label and text-index """
+
+    def __init__(self, label_list):
+        self.label_list = label_list
+
+    def __call__(self, preds, label=None, *args, **kwargs):
+        if isinstance(preds, paddle.Tensor):
+            preds = preds.numpy()
+        pred_idxs = preds.argmax(axis=1)
+        decode_out = [(self.label_list[idx], preds[i, idx])
+                      for i, idx in enumerate(pred_idxs)]
+        if label is None:
+            return decode_out
+        label = [(self.label_list[idx], 1.0) for idx in label]
+        return decode_out, label
+
+
+class CTCLabelDecode:
+    """ Convert between text-label and text-index """
+
+    def __init__(self, character_dict_path=None, use_space_char=False):
+        self.beg_str = "sos"
+        self.end_str = "eos"
+
+        self.character_str = []
+        if character_dict_path is None:
+            self.character_str = "0123456789abcdefghijklmnopqrstuvwxyz"
+            dict_character = list(self.character_str)
+        else:
+            with open(character_dict_path, "rb") as fin:
+                lines = fin.readlines()
+                for line in lines:
+                    line = line.decode('utf-8').strip("\n").strip("\r\n")
+                    self.character_str.append(line)
+            if use_space_char:
+                self.character_str.append(" ")
+            dict_character = list(self.character_str)
+
+        dict_character = self.add_special_char(dict_character)
+        self.dict = {}
+        for i, char in enumerate(dict_character):
+            self.dict[char] = i
+        self.character = dict_character
+
+    def decode(self, text_index, text_prob=None, is_remove_duplicate=False):
+        """ convert text-index into text-label. """
+        result_list = []
+        ignored_tokens = self.get_ignored_tokens()
+        batch_size = len(text_index)
+        for batch_idx in range(batch_size):
+            char_list = []
+            conf_list = []
+            for idx in range(len(text_index[batch_idx])):
+                if text_index[batch_idx][idx] in ignored_tokens:
+                    continue
+                if is_remove_duplicate:
+                    # only for predict
+                    if idx > 0 and text_index[batch_idx][idx - 1] == text_index[
+                        batch_idx][idx]:
+                        continue
+                char_list.append(self.character[int(text_index[batch_idx][
+                                                        idx])])
+                if text_prob is not None:
+                    conf_list.append(text_prob[batch_idx][idx])
+                else:
+                    conf_list.append(1)
+            text = ''.join(char_list)
+            result_list.append((text, np.mean(conf_list)))
+        return result_list
+
+    @staticmethod
+    def get_ignored_tokens():
+        return [0]  # for ctc blank
+
+    def __call__(self, preds, label=None, *args, **kwargs):
+        if isinstance(preds, tuple):
+            preds = preds[-1]
+        preds_idx = preds.argmax(axis=2)
+        preds_prob = preds.max(axis=2)
+        text = self.decode(preds_idx, preds_prob, is_remove_duplicate=True)
+        if label is None:
+            return text
+        label = self.decode(label)
+        return text, label
+
+    @staticmethod
+    def add_special_char(dict_character):
+        dict_character = ['blank'] + dict_character
+        return dict_character
+
+
+class DBPostProcess:
     """
     The post process for Differentiable Binarization (DB).
     """
@@ -31,7 +125,7 @@ class DBPostProcess(object):
                  max_candidates=1000,
                  unclip_ratio=2.0,
                  use_dilation=False,
-                 **kwargs):
+                 ):
         self.thresh = thresh
         self.box_thresh = box_thresh
         self.max_candidates = max_candidates
@@ -93,11 +187,11 @@ class DBPostProcess(object):
         expanded = np.array(offset.Execute(distance))
         return expanded
 
-    def get_mini_boxes(self, contour):
+    @staticmethod
+    def get_mini_boxes(contour):
         bounding_box = cv2.minAreaRect(contour)
         points = sorted(list(cv2.boxPoints(bounding_box)), key=lambda x: x[0])
 
-        index_1, index_2, index_3, index_4 = 0, 1, 2, 3
         if points[1][1] > points[0][1]:
             index_1 = 0
             index_4 = 1
@@ -116,7 +210,8 @@ class DBPostProcess(object):
         ]
         return box, min(bounding_box[1])
 
-    def box_score(self, bitmap, _box):
+    @staticmethod
+    def box_score(bitmap, _box):
         '''
         box_score_fast: use bbox mean score as the mean score
         '''
