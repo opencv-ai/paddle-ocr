@@ -83,8 +83,12 @@ class TextClassifier(object):
 
             input_dict = dict()
             input_dict[self.input_tensor.name] = norm_img_batch
-            outputs = self.predictor.run(None, input_dict)
-            prob_out = outputs[0]
+            outputs = []
+            for norm_img in norm_img_batch:
+                input_dict = dict()
+                input_dict[self.input_tensor.name] = norm_img[np.newaxis]
+                outputs.extend(self.predictor.run(None, input_dict)[0])
+            prob_out = np.array(outputs)
             cls_result = self.postprocess_op(prob_out)
             elapse += time.time() - starttime
             for rno in range(len(cls_result)):
