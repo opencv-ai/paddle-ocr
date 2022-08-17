@@ -19,7 +19,6 @@ import numpy as np
 import cv2
 from shapely.geometry import Polygon
 import pyclipper
-import paddle
 
 
 class ClsPostProcess:
@@ -29,8 +28,6 @@ class ClsPostProcess:
         self.label_list = label_list
 
     def __call__(self, preds, label=None, *args, **kwargs):
-        if isinstance(preds, paddle.Tensor):
-            preds = preds.numpy()
         pred_idxs = preds.argmax(axis=1)
         decode_out = [(self.label_list[idx], preds[i, idx])
                       for i, idx in enumerate(pred_idxs)]

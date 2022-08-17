@@ -27,7 +27,7 @@ def parse_args():
     parser.add_argument("--max_batch_size", type=int, default=10)
     parser.add_argument("--use_dilation", type=bool, default=False)
     # Angle classification params
-    parser.add_argument("--use_angle_cls", type=bool, default=True)
+    parser.add_argument("--use_angle_cls", action="store_true")
     parser.add_argument("--label_list", type=list, default=['0', '180'])
     parser.add_argument("--cls_batch_num", type=int, default=6)
     parser.add_argument("--cls_thresh", type=float, default=0.9)
