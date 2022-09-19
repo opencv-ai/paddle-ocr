@@ -53,23 +53,22 @@ class TextRecognizer:
         st = time.time()
         for beg_img_no in range(0, img_num, batch_num):
             end_img_no = min(img_num, beg_img_no + batch_num)
-            norm_img_batch = []
             max_wh_ratio = 0
             for ino in range(beg_img_no, end_img_no):
                 h, w = img_list[indices[ino]].shape[0:2]
                 wh_ratio = w * 1.0 / h
                 max_wh_ratio = max(max_wh_ratio, wh_ratio)
+            outputs = []
+            input_dict = dict()
             for ino in range(beg_img_no, end_img_no):
                 norm_img = self.resize_norm_img(img_list[indices[ino]],
                                                 max_wh_ratio)
                 norm_img = norm_img[np.newaxis, :]
-                norm_img_batch.append(norm_img)
-            norm_img_batch = np.concatenate(norm_img_batch)
-            input_dict = dict()
-            input_dict[self.input_tensor.name] = norm_img_batch
-            outputs = self.predictor.run(None,
-                                         input_dict)
-            preds = outputs[0]
+                input_dict[self.input_tensor.name] = norm_img
+                pred = self.predictor.run(None,
+                                         input_dict)[0]
+                outputs.append(pred)
+            preds = np.concatenate(outputs)
             rec_result = self.postprocess_op(preds)
             for rno in range(len(rec_result)):
                 rec_res[indices[beg_img_no + rno]] = rec_result[rno]
