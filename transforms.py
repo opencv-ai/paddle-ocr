@@ -16,7 +16,37 @@
 
 import cv2
 import numpy as np
+import math
 
+
+class PadImage:
+    def __init__(self, pad_value=0, image_shape=(640, 640)):
+        self.pad_value = pad_value
+        self.image_shape = image_shape
+
+    def pad_img(self, data):
+        img = data["image"]
+        h, w, _ = img.shape
+        pads = [
+            math.floor((self.image_shape[0] - h) // 2),
+            math.floor((self.image_shape[1] - w) // 2),
+        ]
+        padded_img = cv2.copyMakeBorder(
+            img,
+            pads[0],
+            int(self.image_shape[0] - h - pads[0]),
+            pads[1],
+            int(self.image_shape[1] - w - pads[1]),
+            cv2.BORDER_CONSTANT,
+            value=self.pad_value,
+        )
+        return padded_img, pads
+
+    def __call__(self, data):
+        padded_img, pads = self.pad_img(data)
+        data["image"] = padded_img
+        data["pads"] = pads
+        return data
 
 class NormalizeImage:
     """ normalize image such as substract mean, divide std
@@ -73,9 +103,10 @@ class KeepKeys(object):
 
 
 class DetResizeForTest(object):
-    def __init__(self, **kwargs):
+    def __init__(self, image_shape=(640, 640), keep_ratio=True):
         super(DetResizeForTest, self).__init__()
-        self.image_shape = kwargs['image_shape']
+        self.image_shape = image_shape
+        self.keep_ratio = keep_ratio
 
     def __call__(self, data):
         img = data['image']
@@ -88,6 +119,12 @@ class DetResizeForTest(object):
     def resize_image(self, img):
         resize_h, resize_w = self.image_shape
         ori_h, ori_w = img.shape[:2]  # (h, w, c)
+        if self.keep_ratio is True:
+            if ori_h > ori_w:
+                resize_w = ori_w * resize_h / ori_h
+            else:
+                resize_h = ori_h * resize_w / ori_w
+
         ratio_h = float(resize_h) / ori_h
         ratio_w = float(resize_w) / ori_w
         img = cv2.resize(img, (int(resize_w), int(resize_h)))

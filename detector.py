@@ -34,7 +34,13 @@ class TextDetector(object):
         pre_process_list = [
             {
                 'DetResizeForTest': {
-                    'image_shape': [img_h, img_w]
+                    'image_shape': [img_h, img_w],
+                    'keep_ratio': True
+                }
+            }, {
+                'PadImage': {
+                    'image_shape': [img_h, img_w],
+                    'pad_value': 0
                 }
             }, {
                 'NormalizeImage': {
@@ -47,7 +53,7 @@ class TextDetector(object):
                 'ToCHWImage': None
             }, {
                 'KeepKeys': {
-                    'keep_keys': ['image', 'shape']
+                    'keep_keys': ['image', 'shape', 'pads']
                 }
             }]
         postprocess_params = dict()
@@ -63,27 +69,14 @@ class TextDetector(object):
 
     @staticmethod
     def order_points_clockwise(pts):
-        """
-        reference from: https://github.com/jrosebr1/imutils/blob/master/imutils/perspective.py
-        # sort the points based on their x-coordinates
-        """
-        xSorted = pts[np.argsort(pts[:, 0]), :]
-
-        # grab the left-most and right-most points from the sorted
-        # x-roodinate points
-        leftMost = xSorted[:2, :]
-        rightMost = xSorted[2:, :]
-
-        # now, sort the left-most coordinates according to their
-        # y-coordinates so we can grab the top-left and bottom-left
-        # points, respectively
-        leftMost = leftMost[np.argsort(leftMost[:, 1]), :]
-        (tl, bl) = leftMost
-
-        rightMost = rightMost[np.argsort(rightMost[:, 1]), :]
-        (tr, br) = rightMost
-
-        rect = np.array([tl, tr, br, bl], dtype="float32")
+        rect = np.zeros((4, 2), dtype="float32")
+        s = pts.sum(axis=1)
+        rect[0] = pts[np.argmin(s)]
+        rect[2] = pts[np.argmax(s)]
+        tmp = np.delete(pts, (np.argmin(s), np.argmax(s)), axis=0)
+        diff = np.diff(np.array(tmp), axis=1)
+        rect[1] = tmp[np.argmin(diff)]
+        rect[3] = tmp[np.argmax(diff)]
         return rect
 
     @staticmethod
@@ -97,6 +90,8 @@ class TextDetector(object):
         img_height, img_width = image_shape[0:2]
         dt_boxes_new = []
         for box in dt_boxes:
+            if type(box) is list:
+                box = np.array(box)
             box = self.order_points_clockwise(box)
             box = self.clip_det_res(box, img_height, img_width)
             rect_width = int(np.linalg.norm(box[0] - box[1]))
@@ -114,7 +109,7 @@ class TextDetector(object):
         st = time.time()
 
         data = transform(data, self.preprocess_op)
-        img, shape_list = data
+        img, shape_list, pads = data
 
         if img is None:
             return None, 0
@@ -127,7 +122,9 @@ class TextDetector(object):
         outputs = self.predictor.run(None, input_dict)
 
         preds = dict()
-        preds['maps'] = outputs[0]
+        result_map = outputs[0]
+        _, _, h, w = result_map.shape
+        preds['maps'] = result_map[:, :, pads[0]:h-pads[0], pads[1]:w-pads[1]]
         post_result = self.postprocess_op(preds, shape_list)
         dt_boxes = post_result[0]['points']
         dt_boxes = self.filter_tag_det_res(dt_boxes, ori_im.shape)

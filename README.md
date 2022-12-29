@@ -2,6 +2,8 @@
 
 The inference code for paddle text detection, angle classification & recognition models using onnxruntime.
 
+Used PaddlePaddle models: ch_ppocr_mobile_v2.0_xx
+
 ### Usage
 We support either text detection pipeline (use `--run_detection` argument) or full pipeline with recognition (`--run_pipeline`). Note that these arguments conflict with each other.
 ```bash
