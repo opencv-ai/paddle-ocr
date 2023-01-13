@@ -2,9 +2,10 @@ import onnx
 import onnxsim
 import numpy as np
 from onnx import numpy_helper, helper, AttributeProto, TensorProto, GraphProto
+import onnxruntime as ort
 
-# model, check = onnxsim.simplify('./source/en_PP-OCRv3_rec_infer_fixed_shape.onnx', input_shapes={'x': [1, 3, 32, 1216]})
-# assert check, "couldn't valide"
+# model, check = onnxsim.simplify('./source/en_PP-OCRv3_rec_infer_fixed_shape.onnx', input_shapes={'x': [1, 3, 48, 1216]})
+# # assert check, "couldn't valide"
 # onnx.save(model, './source/en_PP-OCRv3_rec_infer_fixed_shape_simplified.onnx')
 
 
@@ -274,56 +275,21 @@ def fix_tranpose(model):
 
 
 def fix_5_dim_nodes(model):
-    output_names = []
-    initializers_to_delete = []
-    initializers_to_insert = []
     for i, node in enumerate(model.graph.node):
         if node.op_type == 'Reshape':
-            inputs = node.input
-            for j, node2 in enumerate(model.graph.initializer):
-                if node2.name in inputs:
-                    if node2.dims[0] == 5:
-                        if j not in initializers_to_delete:
-                            initializers_to_delete.append(j)
-                            initializer_tensor = onnx.helper.make_tensor(
-                                name=node2.name,
-                                data_type=node2.data_type,
-                                dims=[4],
-                                vals=[-1, 3, 8, 15])
-                            initializers_to_insert.append(initializer_tensor)
-                            for node3 in model.graph.node:
-                                if node.op_type == "Reshape":
-                                    input3 = node3.input
-                                    if node2.name in input3:
-                                        output_names.append(node3.output[0])
-                                        # valinfo = None
-                                        # for x in model.graph.value_info:
-                                        #     if x.name == node3.output[0]:
-                                        #         valinfo = x
-                                        # del valinfo.type.tensor_type.shape.dim[0]
-    for i in sorted(list(set(initializers_to_delete)), reverse=True):
-        del model.graph.initializer[i]
-    for init in initializers_to_insert:
-        model.graph.initializer.insert(0, init)
+            for val in model.graph.initializer:
+                if val.name == node.input[1]:
+                    if val.dims[0] == 5:
+                        del val.int64_data[0]
+                        val.dims[0] = 4
+                        # val.int64_data[0] = -1 # ToDo: produces shape mismatch error without this line
     for i, node in enumerate(model.graph.node):
-        if node.op_type == "Transpose" and node.input[0] in output_names:
+        if node.op_type == "Transpose" and len(node.attribute[0].ints) == 5:
             del node.attribute[0].ints[0]
             node.attribute[0].ints[0] = 1
             node.attribute[0].ints[1] = 2
             node.attribute[0].ints[2] = 0
             node.attribute[0].ints[3] = 3
-            # valinfo = None
-            # for x in model.graph.value_info:
-            #     if x.name == node.output[0]:
-            #         valinfo = x
-            # del valinfo.type.tensor_type.shape.dim[1]
-    for i, x in enumerate(model.graph.value_info):
-        if len(x.type.tensor_type.shape.dim) == 5:
-            print(x.name)
-            for j, val in enumerate(x.type.tensor_type.shape.dim):
-                if val.dim_value == 1:
-                    del model.graph.value_info[i].type.tensor_type.shape.dim[j]
-                    break
 
 def fix_lstm(model):
     constify = set()
@@ -444,11 +410,14 @@ def fix_reshape(model):
         if node.op_type == 'Reshape':
             for val in model.graph.initializer:
                 if val.name == node.input[1]:
+                    print(val.name)
                     data = onnx.numpy_helper.to_array(val)
+                    print(data)
                     if 0 in data:
                         for info in model.graph.value_info:
                             if info.name == node.output[0]:
                                 shape = [x.dim_value for x in info.type.tensor_type.shape.dim]
+                                print(shape)
                                 for j in range(len(shape)):
                                     val.int64_data[j] = shape[j]
 
@@ -462,12 +431,44 @@ def fix_avg_pool(model):
                     break
 
 def fix_reduce_mean(model):
+    processed = []
     # ToDo: Make correct fix with transpose nodes, this one is for Lens Studio importing only
     for i, node in enumerate(model.graph.node):
+        if node.name in processed:
+            continue
+        dst = i
         if node.op_type == "ReduceMean":
+            processed.append(node.name)
             for j, att in enumerate(model.graph.node[i].attribute):
                 if att.name == "axes":
-                    att.ints[0] = 1
+                    orig_out_name = node.output[0]
+                    orig_input_name = node.input[0]
+                    model.graph.node[i].output[0] = orig_out_name + "_permuted"
+                    transpose_output_name = orig_input_name + "_permuted"
+                    model.graph.node[i].input[0] = transpose_output_name
+                    swap_axes = [0, 1, 2]
+                    assert len(att.ints) == 1
+                    swap_axes[1] = att.ints[0]
+                    swap_axes[att.ints[0]] = 1
+                    model.graph.node[i].attribute[j].ints[0] = 1
+                    new_node = onnx.helper.make_node(
+                        "Transpose",
+                        name=f'ReduceMeanTranspose_{dst}',
+                        inputs=[orig_input_name],
+                        outputs=[transpose_output_name],
+                        perm=swap_axes,
+                    )
+                    model.graph.node.insert(dst, new_node)
+                    dst += 1
+                    reverse_node = onnx.helper.make_node(
+                        "Transpose",
+                        name=f'ReduceMeanTransposeReverse_{dst}',
+                        inputs=[orig_out_name + "_permuted"],
+                        outputs=[orig_out_name],
+                        perm=swap_axes,
+
+                    )
+                    model.graph.node.insert(dst + 1, reverse_node)
 
 # def fix_matmul(model):
 #     matmul = 'MatMul_0'
@@ -537,16 +538,23 @@ def fix_matmul(model):
                     broken = True
                     new_shape_ = [k.dim_value for k in valinfo.type.tensor_type.shape.dim if k.dim_value != 1]
                     # new_shape_.insert(1, 0)
-                    new_shape = onnx.numpy_helper.from_array(np.array(new_shape_, dtype=np.int64),
-                                                             name=input_name + '/new_shape')
-                    model.graph.initializer.insert(0, new_shape)
+                    # new_shape = onnx.numpy_helper.from_array(np.array(new_shape_, dtype=np.int64),
+                    #                                          name=input_name + '/new_shape')
+                    # model.graph.initializer.insert(0, new_shape)
                     out_name = input_name + "_reshaped"
                     new_node = onnx.helper.make_node(
-                        'Reshape',
+                        "Transpose",
                         name=f'MatMul_reshape{dst}',
-                        inputs=[input_name, input_name + '/new_shape'],
+                        inputs=[input_name],
                         outputs=[out_name],
+                        perm=(1, 0, 2, 3),
                     )
+                    # new_node = onnx.helper.make_node(
+                    #     'Reshape',
+                    #     name=f'MatMul_reshape{dst}',
+                    #     inputs=[input_name, input_name + '/new_shape'],
+                    #     outputs=[out_name],
+                    # )
                     model.graph.node.insert(dst, new_node)
                     dst += 1
                     model.graph.node[dst].input[j] = out_name
@@ -562,17 +570,24 @@ def fix_matmul(model):
                     name=matmul_output_name + '/new_shape')
                 out_name = matmul_output_name + "_reshaped"
                 new_node = onnx.helper.make_node(
-                    'Reshape',
+                    "Transpose",
                     name=f'MatMul_after_reshape{dst}',
-                    inputs=[matmul_output_name, matmul_output_name + '/new_shape'],
+                    inputs=[matmul_output_name],
                     outputs=[out_name],
+                    perm=(1, 0, 2, 3),
                 )
-                model.graph.initializer.insert(0, matmul_after_reshape_shape)
+                # new_node = onnx.helper.make_node(
+                #     'Reshape',
+                #     name=f'MatMul_after_reshape{dst}',
+                #     inputs=[matmul_output_name, matmul_output_name + '/new_shape'],
+                #     outputs=[out_name],
+                # )
+                # model.graph.initializer.insert(0, matmul_after_reshape_shape)
                 dst += 1
                 model.graph.node.insert(dst, new_node)
                 names_to_fix.append(matmul_output_name)
     for i, node in enumerate(model.graph.node):
-        if node.op_type == "Reshape":
+        if node.op_type == "Transpose" and "MatMul" in node.name:
             continue
         for j, inp in enumerate(node.input):
             if inp in names_to_fix:
@@ -587,7 +602,7 @@ def fix_softmax(model):
                 if att.name == "axis" and att.i == 3:
                     print(node.name)
                     att.i = 1
-
+fix_reduce_mean(model)
 fix_hardsigmoid(model)
 fix_convs(model)
 fix_tranpose(model)
@@ -606,15 +621,13 @@ fix_squeeze(model)
 fix_reshape(model)
 fix_avg_pool(model)
 fix_5_dim_nodes(model)
-fix_reduce_mean(model)
 fix_matmul(model)
-# fix_softmax(model)
+fix_softmax(model)
 
 
 
 for i in range(len(model.graph.value_info)):
     del model.graph.value_info[-1]
-print(len(model.graph.value_info))
 model = shape_inference.infer_shapes(model)
 
 for x in range(len(model.graph.input) - 1):
@@ -633,6 +646,10 @@ for i in reversed(removal):
     del model.graph.initializer[i]
 
 model = shape_inference.infer_shapes(model)
-# model, check = onnxsim.simplify(model, input_shapes={'x': [1, 3, 32, 1216]})
+onnx.checker.check_model(model, True)
+dummy_input = np.random.random((1, 3, 48, 1216)).astype(np.float32)
 onnx.save(model, './changed/recognition_v3.onnx')
+ort_sess = ort.InferenceSession('./changed/recognition_v3.onnx')
+outputs = ort_sess.run(None, {'x': dummy_input})
+# model, check = onnxsim.simplify(model, input_shapes={'x': [1, 3, 32, 1216]})
 print('ok')
