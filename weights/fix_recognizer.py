@@ -4,99 +4,6 @@ import numpy as np
 from onnx import numpy_helper, helper, AttributeProto, TensorProto, GraphProto
 import onnxruntime as ort
 
-# model, check = onnxsim.simplify('./source/en_PP-OCRv3_rec_infer_fixed_shape.onnx', input_shapes={'x': [1, 3, 48, 1216]})
-# # assert check, "couldn't valide"
-# onnx.save(model, './source/en_PP-OCRv3_rec_infer_fixed_shape_simplified.onnx')
-
-
-model = onnx.load('./source/en_PP-OCRv3_rec_infer_fixed_shape_simplified.onnx')
-
-for i, node in enumerate(model.graph.input):
-    if node.name == 'Constant_0' or node.name == 'Constant_2':
-        print('inp: ', i, node.name)
-
-for i, node in enumerate(model.graph.initializer):
-    if node.name == 'Constant_0' or node.name == 'Constant_2':
-        print('init: ', i, node.name)        
-
-
-# name        val  init input
-#inp:  9 Constant_0
-#inp:  11 Constant_2
-#init:  8 Constant_0
-#init:  10 Constant_2
-# Constant_0: 6.0, #20  #21
-# Constant_2: 0.0, #22  #23
-del model.graph.initializer[24]
-del model.graph.initializer[22]
-#
-# del model.graph.input[11]
-# del model.graph.input[9]
-
-
-C_0 = onnx.helper.make_tensor_value_info('Constant_0', onnx.TensorProto.FLOAT, [1])
-c_0 = onnx.helper.make_node(
-    'Constant', [], ['Constant_0'],
-    value=onnx.numpy_helper.from_array(np.array([6], dtype=np.float32), name='Constant_0'),
-)
-
-C_1 = onnx.helper.make_tensor_value_info('Constant_2', onnx.TensorProto.FLOAT, [1])
-c_1 = onnx.helper.make_node(
-    'Constant', [], ['Constant_2'],
-    value=onnx.numpy_helper.from_array(np.array([0], dtype=np.float32), name='Constant_2'),
-)
-
-model.graph.node.insert(0, c_0)
-model.graph.node.insert(0, c_1)
-
-model.graph.value_info.insert(0, C_0)
-model.graph.value_info.insert(0, C_1)
-print('\n\n')
-for i, node in enumerate(model.graph.initializer):
-    if node.name == "Constant_123" or node.name == "Constant_124" or node.name == "Constant_130" or node.name == "Constant_134":
-        print('init: ', i, node.name)
-
-del model.graph.initializer[31]
-del model.graph.initializer[30]
-del model.graph.initializer[27]
-del model.graph.initializer[26]
-
-C_123 = onnx.helper.make_tensor_value_info('Constant_123', onnx.TensorProto.INT64, [1])
-c_123 = onnx.helper.make_node(
-    'Constant', [], ['Constant_123'],
-    value=onnx.numpy_helper.from_array(np.array([0], dtype=np.int64), name='Constant_123'),
-)
-
-C_124 = onnx.helper.make_tensor_value_info('Constant_124', onnx.TensorProto.INT64, [1])
-c_124 = onnx.helper.make_node(
-    'Constant', [], ['Constant_124'],
-    value=onnx.numpy_helper.from_array(np.array([1], dtype=np.int64), name='Constant_124'),
-)
-
-C_130 = onnx.helper.make_tensor_value_info('Constant_130', onnx.TensorProto.INT64, [1])
-c_130 = onnx.helper.make_node(
-    'Constant', [], ['Constant_130'],
-    value=onnx.numpy_helper.from_array(np.array([2], dtype=np.int64), name='Constant_130'),
-)
-
-C_134 = onnx.helper.make_tensor_value_info('Constant_134', onnx.TensorProto.INT64, [1])
-c_134 = onnx.helper.make_node(
-    'Constant', [], ['Constant_134'],
-    value=onnx.numpy_helper.from_array(np.array([3], dtype=np.int64), name='Constant_134'),
-)
-
-model.graph.node.insert(0, c_123)
-model.graph.node.insert(0, c_124)
-
-model.graph.value_info.insert(0, C_123)
-model.graph.value_info.insert(0, C_124)
-
-model.graph.node.insert(0, c_130)
-model.graph.node.insert(0, c_134)
-
-model.graph.value_info.insert(0, C_130)
-model.graph.value_info.insert(0, C_134)
-
 def add_const(i, inp, name, dtype=np.int64):
     inp = np.array(inp, dtype=dtype)
     inp = onnx.numpy_helper.from_array(inp, name=name)
@@ -275,14 +182,30 @@ def fix_tranpose(model):
 
 
 def fix_5_dim_nodes(model):
+    node_to_delete = []
     for i, node in enumerate(model.graph.node):
         if node.op_type == 'Reshape':
             for val in model.graph.initializer:
                 if val.name == node.input[1]:
                     if val.dims[0] == 5:
                         del val.int64_data[0]
+                        print(val.int64_data)
                         val.dims[0] = 4
                         # val.int64_data[0] = -1 # ToDo: produces shape mismatch error without this line
+        if node.op_type == "Squeeze":
+            input_name = node.input[0]
+            valinfo = None
+            for x in model.graph.value_info:
+                if x.name == input_name:
+                    valinfo = x
+            if valinfo is None:
+                print("Warning, not found shapes info for node", node.name, "with input ", input_name)
+                continue
+            if len(valinfo.type.tensor_type.shape.dim) == 5:
+                node_to_delete.append(i)
+                for j, node2 in enumerate(model.graph.node):
+                    if node2.output[0] in node.input:
+                        model.graph.node[j].output[0] = node.output[0]
     for i, node in enumerate(model.graph.node):
         if node.op_type == "Transpose" and len(node.attribute[0].ints) == 5:
             del node.attribute[0].ints[0]
@@ -290,6 +213,8 @@ def fix_5_dim_nodes(model):
             node.attribute[0].ints[1] = 2
             node.attribute[0].ints[2] = 0
             node.attribute[0].ints[3] = 3
+    for i in node_to_delete[::-1]:
+        del model.graph.node[i]
 
 def fix_lstm(model):
     constify = set()
@@ -309,21 +234,24 @@ def fix_lstm(model):
         add_const(0, data, name, data.dtype)
 
 def fix_squeeze(model):
-    node_to_delete = []
-    for i, node in enumerate(model.graph.node):
-        if node.op_type == "Squeeze":
-            input_name = node.input[0]
-            valinfo = None
-            for x in model.graph.value_info:
-                if x.name == input_name:
-                    valinfo = x
-            if len(valinfo.type.tensor_type.shape.dim) == 5:
-                node_to_delete.append(i)
-                for j, node2 in enumerate(model.graph.node):
-                    if node2.output[0] in node.input:
-                        model.graph.node[j].output[0] = node.output[0]
-    for i in node_to_delete[::-1]:
-        del model.graph.node[i]
+    # node_to_delete = []
+    # for i, node in enumerate(model.graph.node):
+    #     if node.op_type == "Squeeze":
+    #         input_name = node.input[0]
+    #         valinfo = None
+    #         for x in model.graph.value_info:
+    #             if x.name == input_name:
+    #                 valinfo = x
+    #         if valinfo is None:
+    #             print("Warning, not found shapes info for node", node.name, "with input ", input_name)
+    #             continue
+    #         if len(valinfo.type.tensor_type.shape.dim) == 5:
+    #             node_to_delete.append(i)
+    #             for j, node2 in enumerate(model.graph.node):
+    #                 if node2.output[0] in node.input:
+    #                     model.graph.node[j].output[0] = node.output[0]
+    # for i in node_to_delete[::-1]:
+    #     del model.graph.node[i]
 
     broken = []
     for i, node in enumerate(model.graph.node):
@@ -432,7 +360,6 @@ def fix_avg_pool(model):
 
 def fix_reduce_mean(model):
     processed = []
-    # ToDo: Make correct fix with transpose nodes, this one is for Lens Studio importing only
     for i, node in enumerate(model.graph.node):
         if node.name in processed:
             continue
@@ -443,18 +370,28 @@ def fix_reduce_mean(model):
                 if att.name == "axes":
                     orig_out_name = node.output[0]
                     orig_input_name = node.input[0]
-                    model.graph.node[i].output[0] = orig_out_name + "_permuted"
-                    transpose_output_name = orig_input_name + "_permuted"
-                    model.graph.node[i].input[0] = transpose_output_name
-                    swap_axes = [0, 1, 2]
+                    unsqueeze_out_name = orig_input_name + "_unsqueeze"
+                    node = onnx.helper.make_node(
+                        'Unsqueeze',
+                        name=f"ReduceMeanUnsqueeze_{dst}",
+                        inputs=[orig_input_name],
+                        outputs=[unsqueeze_out_name],
+                        axes=[0],
+                    )
+                    model.graph.node.insert(dst, node)
+                    dst += 1
+                    model.graph.node[dst].output[0] = orig_out_name + "_unsqueezed_permuted"
+                    transpose_output_name = unsqueeze_out_name + "_permuted"
+                    model.graph.node[dst].input[0] = transpose_output_name
+                    swap_axes = [0, 1, 2, 3]
                     assert len(att.ints) == 1
-                    swap_axes[1] = att.ints[0]
-                    swap_axes[att.ints[0]] = 1
-                    model.graph.node[i].attribute[j].ints[0] = 1
+                    swap_axes[1] = att.ints[0] + 1
+                    swap_axes[att.ints[0] + 1] = 1
+                    model.graph.node[dst].attribute[j].ints[0] = 1
                     new_node = onnx.helper.make_node(
                         "Transpose",
                         name=f'ReduceMeanTranspose_{dst}',
-                        inputs=[orig_input_name],
+                        inputs=[unsqueeze_out_name],
                         outputs=[transpose_output_name],
                         perm=swap_axes,
                     )
@@ -463,12 +400,21 @@ def fix_reduce_mean(model):
                     reverse_node = onnx.helper.make_node(
                         "Transpose",
                         name=f'ReduceMeanTransposeReverse_{dst}',
-                        inputs=[orig_out_name + "_permuted"],
-                        outputs=[orig_out_name],
+                        inputs=[orig_out_name + "_unsqueezed_permuted"],
+                        outputs=[orig_out_name + "_unsqueezed"],
                         perm=swap_axes,
 
                     )
                     model.graph.node.insert(dst + 1, reverse_node)
+                    node = onnx.helper.make_node(
+                        'Squeeze',
+                        name=f"ReduceMeanSqueeze_{dst}",
+                        inputs=[orig_out_name + "_unsqueezed"],
+                        outputs=[orig_out_name],
+                        axes=[0],
+                    )
+
+                    model.graph.node.insert(dst + 2, node)
 
 # def fix_matmul(model):
 #     matmul = 'MatMul_0'
@@ -595,61 +541,190 @@ def fix_matmul(model):
 
 
 def fix_softmax(model):
-    # ToDo: apply correct fix, add Transpose nodes before and after softmax
+    processed = []
     for i, node in enumerate(model.graph.node):
+        if node.name in processed:
+            continue
+        dst = i
         if node.op_type == "Softmax":
+            processed.append(node.name)
+            if node.name == "Softmax_2": # ToDo: skip last softmax correctly
+                continue
             for j, att in enumerate(model.graph.node[i].attribute):
-                if att.name == "axis" and att.i == 3:
-                    print(node.name)
-                    att.i = 1
-fix_reduce_mean(model)
-fix_hardsigmoid(model)
-fix_convs(model)
-fix_tranpose(model)
-# fix_lstm(model)
+                if att.name == "axis":
+                    orig_out_name = node.output[0]
+                    orig_input_name = node.input[0]
+                    model.graph.node[i].output[0] = orig_out_name + "_permuted"
+                    transpose_output_name = orig_input_name + "_permuted"
+                    model.graph.node[i].input[0] = transpose_output_name
+                    swap_axes = [0, 1, 2, 3]
+                    swap_axes[1] = att.i
+                    swap_axes[att.i] = 1
+                    model.graph.node[i].attribute[j].i = 1
+                    new_node = onnx.helper.make_node(
+                        "Transpose",
+                        name=f'SoftmaxTranspose_{dst}',
+                        inputs=[orig_input_name],
+                        outputs=[transpose_output_name],
+                        perm=swap_axes,
+                    )
+                    model.graph.node.insert(dst, new_node)
+                    dst += 1
+                    reverse_node = onnx.helper.make_node(
+                        "Transpose",
+                        name=f'SoftmaxTransposeReverse{dst}',
+                        inputs=[orig_out_name + "_permuted"],
+                        outputs=[orig_out_name],
+                        perm=swap_axes,
 
-model.graph.output[0].type.tensor_type.shape.dim[0].dim_value = 1
+                    )
+                    model.graph.node.insert(dst + 1, reverse_node)
+            # for j, att in enumerate(model.graph.node[i].attribute):
+            #     if att.name == "axis" and att.i == 3:
+            #         print(node.name)
+            #         att.i = 1
 
-from onnx import shape_inference
-model = shape_inference.infer_shapes(model)
+if __name__ == "__main__":
+    # model, check = onnxsim.simplify('./source/en_PP-OCRv3_rec_infer_fixed_shape.onnx', input_shapes={'x': [1, 3, 48, 1216]})
+    # # assert check, "couldn't valide"
+    # onnx.save(model, './source/en_PP-OCRv3_rec_infer_fixed_shape_simplified.onnx')
 
-fix_final_softmax(model)
-for i in range(len(model.graph.value_info)):
-    del model.graph.value_info[-1]
-model = shape_inference.infer_shapes(model)
-fix_squeeze(model)
-fix_reshape(model)
-fix_avg_pool(model)
-fix_5_dim_nodes(model)
-fix_matmul(model)
-fix_softmax(model)
+    model = onnx.load('./source/en_PP-OCRv3_rec_infer_fixed_shape_simplified.onnx')
+
+    for i, node in enumerate(model.graph.input):
+        if node.name == 'Constant_0' or node.name == 'Constant_2':
+            print('inp: ', i, node.name)
+
+    for i, node in enumerate(model.graph.initializer):
+        if node.name == 'Constant_0' or node.name == 'Constant_2':
+            print('init: ', i, node.name)
+
+            # name        val  init input
+    # inp:  9 Constant_0
+    # inp:  11 Constant_2
+    # init:  8 Constant_0
+    # init:  10 Constant_2
+    # Constant_0: 6.0, #20  #21
+    # Constant_2: 0.0, #22  #23
+    del model.graph.initializer[24]
+    del model.graph.initializer[22]
+    #
+    # del model.graph.input[11]
+    # del model.graph.input[9]
+
+    C_0 = onnx.helper.make_tensor_value_info('Constant_0', onnx.TensorProto.FLOAT, [1])
+    c_0 = onnx.helper.make_node(
+        'Constant', [], ['Constant_0'],
+        value=onnx.numpy_helper.from_array(np.array([6], dtype=np.float32), name='Constant_0'),
+    )
+
+    C_1 = onnx.helper.make_tensor_value_info('Constant_2', onnx.TensorProto.FLOAT, [1])
+    c_1 = onnx.helper.make_node(
+        'Constant', [], ['Constant_2'],
+        value=onnx.numpy_helper.from_array(np.array([0], dtype=np.float32), name='Constant_2'),
+    )
+
+    model.graph.node.insert(0, c_0)
+    model.graph.node.insert(0, c_1)
+
+    model.graph.value_info.insert(0, C_0)
+    model.graph.value_info.insert(0, C_1)
+    print('\n\n')
+    for i, node in enumerate(model.graph.initializer):
+        if node.name == "Constant_123" or node.name == "Constant_124" or node.name == "Constant_130" or node.name == "Constant_134":
+            print('init: ', i, node.name)
+
+    del model.graph.initializer[31]
+    del model.graph.initializer[30]
+    del model.graph.initializer[27]
+    del model.graph.initializer[26]
+
+    C_123 = onnx.helper.make_tensor_value_info('Constant_123', onnx.TensorProto.INT64, [1])
+    c_123 = onnx.helper.make_node(
+        'Constant', [], ['Constant_123'],
+        value=onnx.numpy_helper.from_array(np.array([0], dtype=np.int64), name='Constant_123'),
+    )
+
+    C_124 = onnx.helper.make_tensor_value_info('Constant_124', onnx.TensorProto.INT64, [1])
+    c_124 = onnx.helper.make_node(
+        'Constant', [], ['Constant_124'],
+        value=onnx.numpy_helper.from_array(np.array([1], dtype=np.int64), name='Constant_124'),
+    )
+
+    C_130 = onnx.helper.make_tensor_value_info('Constant_130', onnx.TensorProto.INT64, [1])
+    c_130 = onnx.helper.make_node(
+        'Constant', [], ['Constant_130'],
+        value=onnx.numpy_helper.from_array(np.array([2], dtype=np.int64), name='Constant_130'),
+    )
+
+    C_134 = onnx.helper.make_tensor_value_info('Constant_134', onnx.TensorProto.INT64, [1])
+    c_134 = onnx.helper.make_node(
+        'Constant', [], ['Constant_134'],
+        value=onnx.numpy_helper.from_array(np.array([3], dtype=np.int64), name='Constant_134'),
+    )
+
+    model.graph.node.insert(0, c_123)
+    model.graph.node.insert(0, c_124)
+
+    model.graph.value_info.insert(0, C_123)
+    model.graph.value_info.insert(0, C_124)
+
+    model.graph.node.insert(0, c_130)
+    model.graph.node.insert(0, c_134)
+
+    model.graph.value_info.insert(0, C_130)
+    model.graph.value_info.insert(0, C_134)
+    fix_reduce_mean(model)
+    # fix_hardsigmoid(model)
+    fix_convs(model)
+    fix_tranpose(model)
+    # # fix_lstm(model)
+
+    model.graph.output[0].type.tensor_type.shape.dim[0].dim_value = 1
+
+    from onnx import shape_inference
+    for i in range(len(model.graph.value_info)):
+        del model.graph.value_info[-1]
+    model = shape_inference.infer_shapes(model)
+
+    fix_final_softmax(model)
+
+    for i in range(len(model.graph.value_info)):
+        del model.graph.value_info[-1]
+    model = shape_inference.infer_shapes(model)
+    # fix_squeeze(model)
+    # fix_reshape(model)
+    fix_avg_pool(model)
+    fix_5_dim_nodes(model)
+    fix_matmul(model)
+    fix_softmax(model)
 
 
 
-for i in range(len(model.graph.value_info)):
-    del model.graph.value_info[-1]
-model = shape_inference.infer_shapes(model)
+    for i in range(len(model.graph.value_info)):
+        del model.graph.value_info[-1]
+    model = shape_inference.infer_shapes(model)
 
-for x in range(len(model.graph.input) - 1):
-    del model.graph.input[-1]
+    for x in range(len(model.graph.input) - 1):
+        del model.graph.input[-1]
 
-all_inputs = set()
-for node in model.graph.node:
-    for input_name in node.input:
-        all_inputs.add(input_name)
+    all_inputs = set()
+    for node in model.graph.node:
+        for input_name in node.input:
+            all_inputs.add(input_name)
 
-removal = []
-for i, node in enumerate(model.graph.initializer):
-    if node.name not in all_inputs:
-        removal.append(i)
-for i in reversed(removal):
-    del model.graph.initializer[i]
+    removal = []
+    for i, node in enumerate(model.graph.initializer):
+        if node.name not in all_inputs:
+            removal.append(i)
+    for i in reversed(removal):
+        del model.graph.initializer[i]
 
-model = shape_inference.infer_shapes(model)
-onnx.checker.check_model(model, True)
-dummy_input = np.random.random((1, 3, 48, 1216)).astype(np.float32)
-onnx.save(model, './changed/recognition_v3.onnx')
-ort_sess = ort.InferenceSession('./changed/recognition_v3.onnx')
-outputs = ort_sess.run(None, {'x': dummy_input})
-# model, check = onnxsim.simplify(model, input_shapes={'x': [1, 3, 32, 1216]})
-print('ok')
+    model = shape_inference.infer_shapes(model)
+    onnx.checker.check_model(model, True)
+    # dummy_input = np.random.random((1, 3, 48, 1216)).astype(np.float32)
+    onnx.save(model, './changed/recognition_v3_WIP.onnx')
+    # ort_sess = ort.InferenceSession('./changed/recognition_v3_WIP.onnx')
+    # outputs = ort_sess.run(None, {'x': dummy_input})
+    # model, check = onnxsim.simplify(model, input_shapes={'x': [1, 3, 32, 1216]})
+    print('ok')

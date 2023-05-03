@@ -4,7 +4,9 @@ from utils import parse_args, model_check, draw_text_boxes, draw_ocr_box_txt
 import cv2
 import os
 from PIL import Image
+from tqdm import tqdm
 import numpy as np
+import json
 
 
 def inference(args):
@@ -17,8 +19,8 @@ def inference(args):
     else:
         image_paths = [args.image_path]
     text_detector = TextDetector(args)
-    for image_path in image_paths:
-        print("Processing: ", image_path)
+    for image_path in tqdm(image_paths):
+        # print("Processing: ", image_path)
         input_image = cv2.imread(image_path)
         if args.run_detection:
             # Inference
@@ -27,7 +29,7 @@ def inference(args):
             # Visualization
             vis_image = draw_text_boxes(boxes, input_image.copy())
             result_vis_image_name = os.path.basename(image_path)
-            cv2.imwrite(f"images/results/{result_vis_image_name}", vis_image)
+            cv2.imwrite(f"/Users/psemkin/work_dirs/snap/snap_2022-2023_project/datasets_for_validation/v1/handwritten_outputs_results/{result_vis_image_name}", vis_image)
         elif args.run_pipeline:
             text_sys = TextPipeline(args)
             font_path = args.vis_font_path
@@ -46,7 +48,13 @@ def inference(args):
                 drop_score=drop_score,
                 font_path=font_path)
             result_vis_image_name = os.path.basename(image_path)
-            cv2.imwrite(f"images/results/{result_vis_image_name}", cv2.cvtColor(draw_img, cv2.COLOR_RGB2BGR))
+            cv2.imwrite(f"/Users/psemkin/work_dirs/snap/snap_2022-2023_project/datasets_for_validation/v1/handwritten_outputs_results/{result_vis_image_name}", cv2.cvtColor(draw_img, cv2.COLOR_RGB2BGR))
+            with open(f"/Users/psemkin/work_dirs/snap/snap_2022-2023_project/datasets_for_validation/v1/handwritten_outputs_results/{os.path.splitext(result_vis_image_name)[0]}.json", "w") as fp:
+                json_data = []
+                for bbox, txt, score in zip(boxes, txts, scores):
+                    json_data.append({"bbox": bbox.tolist(), "text": txt, "score": score})
+                json_data.sort(key=lambda x: x["score"], reverse=True)
+                json.dump(json_data, fp, indent=4)
         else:
             raise NotImplementedError("We support either text detection or full pipeline")
 
