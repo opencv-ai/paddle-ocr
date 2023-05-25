@@ -2,6 +2,7 @@ import onnx
 import onnxsim
 import numpy as np
 from onnx import numpy_helper, helper, AttributeProto, TensorProto, GraphProto
+from argparse import ArgumentParser
 
 def simplify(name, rename=False, **kwargs):
     model, check = onnxsim.simplify(name, **kwargs)
@@ -144,8 +145,15 @@ def fix_resize(model):
                 del node.attribute[to_delete]
 
 
+def parse_args():
+    parser = ArgumentParser("Fix layers for detection model")
+    parser.add_argument("--input_path", type=str, help="Input .onnx file")
+    parser.add_argument("--output_path", type=str, help="Output .onnx file")
+    return parser.parse_args()
+
 if __name__ == "__main__":
-    model_path = "./source/en_PP-OCRv3_det_infer_fixed_shape.onnx"
+    args = parse_args()
+    model_path = args.input_path
     model = simplify(model_path, True)
     # model = onnx.load("../../detection_v3_optimized.onnx")
     inputs_to_delete = []
@@ -189,5 +197,5 @@ if __name__ == "__main__":
     # model, check = onnxsim.simplify(model)
     fix_hardsigmoid(model)
     # fix_resize(model)
-    check_save(model, "./changed/en_PP-OCRv3_det_infer_fixed_shape_optimized_fixed.onnx")
+    check_save(model, args.output_path)
     # fix_hardsigmoid(model)
