@@ -56,7 +56,7 @@ optional arguments:
 
 <div align="center">
     <h4> Full Pipeline </h4>
-    <img src="images/results/test1.jpg" width="800">
+    <img src="images/results/test1.png" width="800">
     <h4> Detection Only </h4>
     <img src="images/results/test2.png" width="800">
 </div>

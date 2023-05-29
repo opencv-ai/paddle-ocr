@@ -14,7 +14,6 @@ def parse_args():
     parser = argparse.ArgumentParser()
     # General params
     parser.add_argument("--det_model_dir", type=str, help="Path to onnx detection model weights")
-    parser.add_argument("--cls_model_dir", type=str, help="Path to onnx angle classifier model weights")
     parser.add_argument("--rec_model_dir", type=str, help="Path to onnx text recognition model weights")
     parser.add_argument("-i", "--image_path", type=str, help="Path to test image or folder with images")
     parser.add_argument("--onnx_check", action="store_true", help="Pass if want to check onnx model with onnx.checker")
@@ -27,11 +26,6 @@ def parse_args():
     parser.add_argument("--det_db_unclip_ratio", type=float, default=1.5)
     parser.add_argument("--max_batch_size", type=int, default=10)
     parser.add_argument("--use_dilation", type=bool, default=False)
-    # Angle classification params
-    parser.add_argument("--use_angle_cls", action="store_true")
-    parser.add_argument("--label_list", type=list, default=['0', '180'])
-    parser.add_argument("--cls_batch_num", type=int, default=6)
-    parser.add_argument("--cls_thresh", type=float, default=0.9)
     # Recognizer params
     parser.add_argument("--rec_batch_num", type=int, default=6)
     parser.add_argument(

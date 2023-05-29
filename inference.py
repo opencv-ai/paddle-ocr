@@ -4,13 +4,14 @@ from utils import parse_args, model_check, draw_text_boxes, draw_ocr_box_txt
 import cv2
 import os
 from PIL import Image
+from tqdm import tqdm
 import numpy as np
+import json
 
 
 def inference(args):
     if args.onnx_check:
         model_check(args.det_model_dir)
-        model_check(args.cls_model_dir)
         model_check(args.rec_model_dir)
     if os.path.isdir(args.image_path):
         image_paths = [os.path.join(args.image_path, img) for img in os.listdir(args.image_path)]
@@ -53,3 +54,4 @@ def inference(args):
 
 if __name__ == "__main__":
     inference(parse_args())
+

@@ -16,7 +16,6 @@ import cv2
 import copy
 import numpy as np
 from detector import TextDetector
-from classifier import TextClassifier
 from recognizer import TextRecognizer
 import os
 
@@ -60,10 +59,7 @@ class TextPipeline:
     def __init__(self, args):
         self.text_detector = TextDetector(args)
         self.text_recognizer = TextRecognizer(args)
-        self.use_angle_cls = args.use_angle_cls
         self.drop_score = args.drop_score
-        if self.use_angle_cls:
-            self.text_classifier = TextClassifier(args)
 
         self.args = args
         self.crop_image_res_index = 0
@@ -91,9 +87,6 @@ class TextPipeline:
             tmp_box = copy.deepcopy(dt_boxes[bno])
             img_crop = get_rotate_crop_image(ori_im, tmp_box)
             img_crop_list.append(img_crop)
-        if self.use_angle_cls and cls:
-            img_crop_list, angle_list, elapse = self.text_classifier(
-                img_crop_list)
         rec_res, elapse = self.text_recognizer(img_crop_list)
         filter_boxes, filter_rec_res = [], []
         for box, rec_result in zip(dt_boxes, rec_res):
